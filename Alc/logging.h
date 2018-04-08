@@ -16,7 +16,7 @@ extern "C" {
 
 extern FILE *LogFile;
 
-#if defined(__GNUC__) && !defined(_WIN32)
+#if defined(__GNUC__) && !defined(_WIN32) && !defined(__vita__)
 #define AL_PRINT(T, MSG, ...) fprintf(LogFile, "AL lib: %s %s: "MSG, T, __FUNCTION__ , ## __VA_ARGS__)
 #else
 void al_print(const char *type, const char *func, const char *fmt, ...) DECL_FORMAT(printf, 3,4);

@@ -165,6 +165,12 @@ inline void althrd_yield(void)
 
 inline int althrd_sleep(const struct timespec *ts, struct timespec *rem)
 {
+#ifdef __vita__
+    // Unimplemented
+    (void)ts;
+    (void)rem;
+    return 0;
+#else
     int ret = nanosleep(ts, rem);
     if(ret != 0)
     {
@@ -172,6 +178,7 @@ inline int althrd_sleep(const struct timespec *ts, struct timespec *rem)
         errno = 0;
     }
     return ret;
+#endif
 }
 
 

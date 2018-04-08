@@ -53,6 +53,9 @@
 
 #include "backends/base.h"
 
+#ifdef __vita__
+#include <psp2kern/kernel/modulemgr.h>
+#endif
 
 /************************************************
  * Backends
@@ -104,6 +107,9 @@ static struct BackendInfo BackendList[] = {
 #endif
 #ifdef HAVE_SDL2
     { "sdl2", ALCsdl2BackendFactory_getFactory },
+#endif
+#ifdef HAVE_VITA
+    { "vita", ALCvitaBackendFactory_getFactory },
 #endif
 
     { "null", ALCnullBackendFactory_getFactory },
@@ -853,6 +859,67 @@ static void alc_deinit(void) __attribute__((destructor));
 #error "No static initialization available on this platform!"
 #endif
 
+#elif defined(__vita__)
+extern void _init_vita_heap(void);
+extern void _free_vita_heap(void);
+extern void _init_vita_reent(void);
+extern void _free_vita_reent(void);
+extern void _init_vita_malloc(void);
+extern void _free_vita_malloc(void);
+extern void _init_vita_io(void);
+extern void _free_vita_io(void);
+
+extern void __libc_init_array(void);
+extern void __libc_fini_array(void);
+
+void _init_vita_newlib(void)
+{
+    _init_vita_heap();
+    _init_vita_reent();
+    //_init_vita_malloc();
+    //_init_vita_io();
+}
+
+void _free_vita_newlib(void)
+{
+    //_free_vita_io();
+    //_free_vita_malloc();
+    _free_vita_reent();
+    _free_vita_heap();
+}
+
+void _fini(void) { }
+void _init(void) { }
+
+unsigned int _newlib_heap_size_user = 12 * 1024 * 1024;
+
+static void alc_init(void);
+static void alc_deinit(void);
+
+void _start() __attribute__ ((weak, alias ("module_start")));
+int module_start(SceSize UNUSED(argc), const void* UNUSED(args))
+{
+    _init_vita_newlib();
+    __libc_init_array();
+
+    // FIXME: Necessary due to https://github.com/vitasdk/newlib/issues/11
+    pthread_init();
+
+    atexit(alc_deinit);
+    alc_init();
+
+    return SCE_KERNEL_START_SUCCESS;
+}
+
+int module_stop(SceSize UNUSED(argc), const void* UNUSED(args))
+{
+    __libc_fini_array();
+    _free_vita_newlib();
+
+    alc_deinit();
+
+    return SCE_KERNEL_STOP_SUCCESS;
+}
 #elif defined(HAVE_GCC_DESTRUCTOR)
 
 static void alc_init(void) __attribute__((constructor));

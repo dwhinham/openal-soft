@@ -417,6 +417,30 @@ void ReadALConfig(void)
 
     alstr_reset(&ppath);
 }
+#elif defined __vita__
+void ReadALConfig(void)
+{
+    const char* config_paths[] =
+    {
+        "ur0:openal/alsoft.conf",
+        "ux0:openal/alsoft.conf",
+        "uma0:openal/alsoft.conf"
+    };
+
+    FILE* f;
+    unsigned int i;
+    for(i = 0; i < sizeof(config_paths) / sizeof(*config_paths); ++i)
+    {
+        TRACE("Loading config %s...\n", config_paths[i]);
+        f = al_fopen(config_paths[i], "r");
+        if(f)
+        {
+            LoadConfigFromFile(f);
+            fclose(f);
+            break;
+        }
+    }
+}
 #else
 void ReadALConfig(void)
 {

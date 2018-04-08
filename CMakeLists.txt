@@ -33,19 +33,23 @@ INCLUDE(CheckTypeSize)
 include(CheckStructHasMember)
 include(CheckFileOffsetBits)
 include(GNUInstallDirs)
+IF(VITA)
+    INCLUDE("${VITASDK}/share/vita.cmake" REQUIRED)
+ENDIF()
 
 SET(CMAKE_ALLOW_LOOSE_LOOP_CONSTRUCTS TRUE)
 
-
-OPTION(ALSOFT_DLOPEN  "Check for the dlopen API for loading optional libs"  ON)
-
 OPTION(ALSOFT_WERROR  "Treat compile warnings as errors"      OFF)
 
-OPTION(ALSOFT_UTILS          "Build and install utility programs"         ON)
-OPTION(ALSOFT_NO_CONFIG_UTIL "Disable building the alsoft-config utility" OFF)
+IF(NOT VITA)
+    OPTION(ALSOFT_DLOPEN  "Check for the dlopen API for loading optional libs"  ON)
 
-OPTION(ALSOFT_EXAMPLES  "Build and install example programs"  ON)
-OPTION(ALSOFT_TESTS     "Build and install test programs"     ON)
+    OPTION(ALSOFT_UTILS          "Build and install utility programs"         ON)
+    OPTION(ALSOFT_NO_CONFIG_UTIL "Disable building the alsoft-config utility" OFF)
+
+    OPTION(ALSOFT_EXAMPLES  "Build and install example programs"  ON)
+    OPTION(ALSOFT_TESTS     "Build and install test programs"     ON)
+ENDIF()
 
 OPTION(ALSOFT_CONFIG "Install alsoft.conf sample configuration file" ON)
 OPTION(ALSOFT_HRTF_DEFS "Install HRTF definition files" ON)
@@ -392,6 +396,11 @@ ELSE()
     SET(CMAKE_REQUIRED_FLAGS "${OLD_REQUIRED_FLAGS}")
 ENDIF()
 
+# Vita: Disable start files
+IF(VITA)
+    SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -nostartfiles")
+ENDIF()
+
 CHECK_C_SOURCE_COMPILES("
 int main()
 {
@@ -589,9 +598,11 @@ IF(NOT HAVE_WINDOWS_H)
         MESSAGE(FATAL_ERROR "No timing function found!")
     ENDIF()
 
-    CHECK_SYMBOL_EXISTS(nanosleep time.h HAVE_NANOSLEEP)
-    IF(NOT HAVE_NANOSLEEP)
-        MESSAGE(FATAL_ERROR "No sleep function found!")
+    IF(NOT VITA)
+        CHECK_SYMBOL_EXISTS(nanosleep time.h HAVE_NANOSLEEP)
+        IF(NOT HAVE_NANOSLEEP)
+            MESSAGE(FATAL_ERROR "No sleep function found!")
+        ENDIF()
     ENDIF()
 
     # We need pthreads outside of Windows
@@ -768,6 +779,7 @@ SET(HAVE_COREAUDIO  0)
 SET(HAVE_OPENSL     0)
 SET(HAVE_WAVE       0)
 SET(HAVE_SDL2       0)
+SET(HAVE_VITA       0)
 
 # Check for SSE support
 OPTION(ALSOFT_REQUIRE_SSE "Require SSE support" OFF)
@@ -1156,6 +1168,14 @@ IF(ALSOFT_REQUIRE_SDL2 AND NOT SDL2_FOUND)
     MESSAGE(FATAL_ERROR "Failed to enabled required SDL2 backend")
 ENDIF()
 
+# Check for PS Vita backend
+IF(VITA)
+    SET(HAVE_VITA 1)
+    SET(ALC_OBJS  ${ALC_OBJS} Alc/backends/vita.c)
+    SET(BACKENDS  "${BACKENDS} PS Vita,")
+    SET(EXTRA_LIBS ${EXTRA_LIBS} SceAudio_stub_weak SceAudioIn_stub_weak)
+ENDIF()
+
 # Optionally enable the Wave Writer backend
 OPTION(ALSOFT_BACKEND_WAVE "Enable Wave Writer backend" ON)
 IF(ALSOFT_BACKEND_WAVE)
@@ -1335,15 +1355,26 @@ ELSE()
         SET(IMPL_TARGET soft_oal)
     ENDIF()
 
-    ADD_LIBRARY(${IMPL_TARGET} SHARED ${OPENAL_OBJS} ${ALC_OBJS})
+    IF(VITA)
+        ADD_EXECUTABLE(${IMPL_TARGET} ${OPENAL_OBJS} ${ALC_OBJS})
+        vita_create_self(${CMAKE_SHARED_LIBRARY_PREFIX}${LIBNAME}.suprx ${IMPL_TARGET} CONFIG ${CMAKE_SOURCE_DIR}/exports.yml)
+        vita_create_stubs(${CMAKE_SHARED_LIBRARY_PREFIX}${LIBNAME}-stubs ${IMPL_TARGET} ${CMAKE_SOURCE_DIR}/exports.yml)
+    ELSE()
+        ADD_LIBRARY(${IMPL_TARGET} SHARED ${OPENAL_OBJS} ${ALC_OBJS})
+    ENDIF()
+
     IF(WIN32)
         SET_TARGET_PROPERTIES(${IMPL_TARGET} PROPERTIES PREFIX "")
     ENDIF()
 ENDIF()
-SET_TARGET_PROPERTIES(${IMPL_TARGET} PROPERTIES OUTPUT_NAME ${LIBNAME}
-    VERSION ${LIB_VERSION}
-    SOVERSION ${LIB_MAJOR_VERSION}
-)
+
+IF(NOT VITA)
+    SET_TARGET_PROPERTIES(${IMPL_TARGET} PROPERTIES OUTPUT_NAME ${LIBNAME}
+        VERSION ${LIB_VERSION}
+        SOVERSION ${LIB_MAJOR_VERSION}
+    )
+ENDIF()
+
 TARGET_COMPILE_DEFINITIONS(${IMPL_TARGET}
     PRIVATE AL_BUILD_LIBRARY AL_ALEXT_PROTOTYPES ${CPP_DEFS})
 TARGET_INCLUDE_DIRECTORIES(${IMPL_TARGET}
@@ -1379,19 +1410,6 @@ IF(WIN32 AND MINGW AND ALSOFT_BUILD_IMPORT_LIB AND NOT LIBTYPE STREQUAL "STATIC"
 ENDIF()
 
 IF(ALSOFT_INSTALL)
-    INSTALL(TARGETS OpenAL EXPORT OpenAL
-            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} ${CMAKE_INSTALL_INCLUDEDIR}/AL
-    )
-    EXPORT(TARGETS OpenAL
-           NAMESPACE OpenAL::
-           FILE OpenALConfig.cmake)
-    INSTALL(EXPORT OpenAL
-            DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/OpenAL
-            NAMESPACE OpenAL::
-            FILE OpenALConfig.cmake)
     INSTALL(FILES include/AL/al.h
                   include/AL/alc.h
                   include/AL/alext.h
@@ -1400,12 +1418,35 @@ IF(ALSOFT_INSTALL)
                   include/AL/efx-presets.h
             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/AL
     )
-    INSTALL(FILES "${OpenAL_BINARY_DIR}/openal.pc"
-            DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
-    IF(TARGET soft_oal)
-        INSTALL(TARGETS soft_oal
-                RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+
+    IF(VITA)
+        INSTALL(FILES
+            "${OpenAL_BINARY_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${LIBNAME}-stubs/${CMAKE_SHARED_LIBRARY_PREFIX}${LIBNAME}_stub.a"
+            "${OpenAL_BINARY_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${LIBNAME}-stubs/${CMAKE_SHARED_LIBRARY_PREFIX}${LIBNAME}_stub_weak.a"
+            "${OpenAL_BINARY_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${LIBNAME}.suprx"
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}
         )
+    ELSE()
+        INSTALL(TARGETS OpenAL EXPORT OpenAL
+                RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+                LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+                ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+                INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/AL
+        )
+        EXPORT(TARGETS OpenAL
+               NAMESPACE OpenAL::
+               FILE OpenALConfig.cmake)
+        INSTALL(EXPORT OpenAL
+                DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/OpenAL
+                NAMESPACE OpenAL::
+                FILE OpenALConfig.cmake)
+        INSTALL(FILES "${OpenAL_BINARY_DIR}/openal.pc"
+                DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
+        IF(TARGET soft_oal)
+            INSTALL(TARGETS soft_oal
+                    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+            )
+        ENDIF()
     ENDIF()
 ENDIF()
 

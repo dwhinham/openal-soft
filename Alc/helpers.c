@@ -48,6 +48,10 @@
 #include <sys/sysctl.h>
 #endif
 
+#ifdef __vita__
+#include <psp2/kernel/clib.h>
+#endif
+
 #ifndef AL_NO_UID_DEFS
 #if defined(HAVE_GUIDDEF_H) || defined(HAVE_INITGUID_H)
 #define INITGUID
@@ -102,7 +106,9 @@ DEFINE_PROPERTYKEY(PKEY_AudioEndpoint_GUID, 0x1da5d803, 0xd492, 0x4edd, 0x8c, 0x
 #ifndef _WIN32
 #include <sys/types.h>
 #include <sys/stat.h>
+#ifndef __vita__
 #include <sys/mman.h>
+#endif
 #include <fcntl.h>
 #include <unistd.h>
 #elif defined(_WIN32_IE)
@@ -253,6 +259,10 @@ void FillCPUCaps(int capfilter)
 #endif
 #endif
 #ifdef HAVE_NEON
+#ifdef __vita__
+    /* Vita: We can safely assume we have NEON */
+    caps |= CPU_CAP_NEON;
+#else
     FILE *file = fopen("/proc/cpuinfo", "rt");
     if(!file)
         ERR("Failed to open /proc/cpuinfo, cannot check for NEON support\n");
@@ -289,6 +299,7 @@ void FillCPUCaps(int capfilter)
         fclose(file);
         file = NULL;
     }
+#endif
 #endif
 
     TRACE("Extensions:%s%s%s%s%s%s\n",
@@ -744,6 +755,11 @@ void UnmapFileMem(const struct FileMapping *mapping)
 
 void GetProcBinary(al_string *path, al_string *fname)
 {
+#ifdef __vita__
+    (void)path;
+    (void)fname;
+    // Unimplemented
+#else
     char *pathname = NULL;
     size_t pathlen;
 
@@ -839,6 +855,7 @@ void GetProcBinary(al_string *path, al_string *fname)
         TRACE("Got: %s, %s\n", alstr_get_cstr(*path), alstr_get_cstr(*fname));
     else if(path) TRACE("Got path: %s\n", alstr_get_cstr(*path));
     else if(fname) TRACE("Got filename: %s\n", alstr_get_cstr(*fname));
+#endif
 }
 
 
@@ -877,10 +894,16 @@ void *GetSymbol(void *handle, const char *name)
 void al_print(const char *type, const char *func, const char *fmt, ...)
 {
     va_list ap;
-
     va_start(ap, fmt);
+#ifdef __vita__
+    char buf[512];
+    sceClibPrintf("AL lib: %s %s: ", type, func);
+    sceClibVsnprintf(buf, 512, fmt, ap);
+    sceClibPrintf(buf);
+#else
     fprintf(LogFile, "AL lib: %s %s: ", type, func);
     vfprintf(LogFile, fmt, ap);
+#endif
     va_end(ap);
 
     fflush(LogFile);
@@ -935,6 +958,9 @@ vector_al_string SearchDataFiles(const char *ext, const char *subdir)
     while(ATOMIC_EXCHANGE_SEQ(&search_lock, 1) == 1)
         althrd_yield();
 
+#ifdef __vita__
+    DirectorySearch(subdir, ext, &results);
+#else
     if(subdir[0] == '/')
         DirectorySearch(subdir, ext, &results);
     else
@@ -1017,6 +1043,7 @@ vector_al_string SearchDataFiles(const char *ext, const char *subdir)
 
         alstr_reset(&path);
     }
+#endif
 
     ATOMIC_STORE_SEQ(&search_lock, 0);
 
@@ -1044,6 +1071,10 @@ struct FileMapping MapFileToMem(const char *fname)
         return ret;
     }
 
+#ifdef __vita__
+    ptr = malloc(sbuf.st_size);
+    read(fd, ptr, sbuf.st_size);
+#else
     ptr = mmap(NULL, sbuf.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
     if(ptr == MAP_FAILED)
     {
@@ -1051,6 +1082,7 @@ struct FileMapping MapFileToMem(const char *fname)
         close(fd);
         return ret;
     }
+#endif
 
     ret.fd = fd;
     ret.ptr = ptr;
@@ -1060,7 +1092,11 @@ struct FileMapping MapFileToMem(const char *fname)
 
 void UnmapFileMem(const struct FileMapping *mapping)
 {
+#ifdef __vita__
+    free(mapping->ptr);
+#else
     munmap(mapping->ptr, mapping->len);
+#endif
     close(mapping->fd);
 }
 
